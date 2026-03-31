@@ -12,17 +12,14 @@ def draw_lps(dwg_path: str, parcels: List[Dict], output_path: str):
         doc = ezdxf.readfile(dwg_path)
         msp = doc.modelspace()
 
-        # Setup layers
         _setup_layers(doc)
-
-        # Find drawing bounds to position parcels
         bounds = _get_drawing_bounds(msp)
 
-        # Draw each parcel as a separate block
         for i, parcel in enumerate(parcels):
             _draw_parcel(msp, parcel, i, bounds)
 
-        doc.saveas(output_path)
+        # Save in R2013 format — compatible with AutoCAD 2013 to 2024
+        doc.saveas(output_path, version="R2013")
         log_info(f"LPS drawing saved: {output_path}")
 
     except Exception as e:
@@ -60,7 +57,6 @@ def _get_drawing_bounds(msp) -> Dict:
         except:
             continue
 
-    # Default bounds if drawing is empty
     if min_x == float('inf'):
         return {"min_x": 0, "min_y": 0, "max_x": 1000, "max_y": 1000}
 
@@ -69,7 +65,6 @@ def _get_drawing_bounds(msp) -> Dict:
 
 def _draw_parcel(msp, parcel: Dict, index: int, bounds: Dict):
     """Draw one parcel — boundary + corridor + info box"""
-    # Each parcel gets its own area on the sheet
     page_width = 400
     page_height = 300
     cols = 3
@@ -79,23 +74,14 @@ def _draw_parcel(msp, parcel: Dict, index: int, bounds: Dict):
     origin_x = bounds["min_x"] + col * (page_width + 50)
     origin_y = bounds["max_y"] + 100 + row * (page_height + 50)
 
-    # Draw parcel boundary box
     _draw_boundary_box(msp, origin_x, origin_y, page_width, page_height, parcel)
-
-    # Draw corridor strip diagonally
     _draw_corridor(msp, origin_x, origin_y, page_width, page_height, parcel)
 
-    # Draw tower marker if this parcel has a tower
     if parcel.get("tower_no") and parcel["tower_no"] != "-":
         _draw_tower_marker(msp, origin_x + page_width / 2, origin_y + page_height / 2, parcel["tower_no"])
 
-    # Draw info box
     _draw_info_box(msp, origin_x, origin_y, parcel)
-
-    # Draw SF number label in center
     _add_text(msp, f"SF No. {parcel['sf_no']}", origin_x + page_width / 2, origin_y + page_height / 2 + 30, 12, "LPS_TEXT")
-
-    # Draw neighbor labels (N/S/E/W)
     _draw_neighbor_labels(msp, origin_x, origin_y, page_width, page_height, parcel)
 
 
@@ -109,20 +95,8 @@ def _draw_corridor(msp, x: float, y: float, w: float, h: float, parcel: Dict):
     """Draw corridor strip diagonally across parcel"""
     corridor_width = _estimate_corridor_width(parcel.get("corridor_sqm", 0), w, h)
     half = corridor_width / 2
-
-    # Diagonal corridor from bottom-left to top-right
-    center_x = x + w / 2
     center_y = y + h / 2
 
-    # Corridor as a parallelogram strip
-    corridor_pts = [
-        (x, center_y - half),
-        (x + w, center_y + half),
-        (x + w, center_y - half),
-        (x, center_y + half),
-    ]
-
-    # Draw corridor boundary lines
     msp.add_line(
         (x, center_y - half), (x + w, center_y + half),
         dxfattribs={"layer": "LPS_CORRIDOR", "lineweight": 25}
@@ -132,11 +106,10 @@ def _draw_corridor(msp, x: float, y: float, w: float, h: float, parcel: Dict):
         dxfattribs={"layer": "LPS_CORRIDOR", "lineweight": 25}
     )
 
-    # Corridor area label
     _add_text(
         msp,
         f"{parcel.get('corridor_sqm', 0):.3f} Sq.m",
-        center_x, center_y - half - 10, 6, "LPS_TEXT"
+        x + w / 2, center_y - half - 10, 6, "LPS_TEXT"
     )
 
 
@@ -147,18 +120,16 @@ def _draw_tower_marker(msp, x: float, y: float, tower_no: str):
 
 
 def _draw_info_box(msp, x: float, y: float, parcel: Dict):
-    """Draw info box at bottom of parcel with SF, area, owner details"""
+    """Draw info box below parcel with all LPS details"""
     box_h = 80
     box_w = 200
     box_x = x
     box_y = y - box_h - 10
 
-    # Box border
     pts = [(box_x, box_y), (box_x + box_w, box_y),
            (box_x + box_w, box_y + box_h), (box_x, box_y + box_h), (box_x, box_y)]
     msp.add_lwpolyline(pts, dxfattribs={"layer": "LPS_INFOBOX"})
 
-    # Info text lines
     line_h = 12
     lines = [
         f"DISTRICT : {parcel.get('district', '')}",
@@ -205,7 +176,5 @@ def _estimate_corridor_width(corridor_sqm: float, parcel_w: float, parcel_h: flo
     """Estimate corridor strip width in drawing units from area"""
     if corridor_sqm <= 0:
         return 20.0
-    # Scale corridor width proportionally to parcel size
-    parcel_area = parcel_w * parcel_h
     ratio = min(corridor_sqm / 5000, 0.4)
     return max(15.0, ratio * parcel_h)
