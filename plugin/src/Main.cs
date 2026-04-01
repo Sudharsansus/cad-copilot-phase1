@@ -1,9 +1,7 @@
-// Main.cs - AutoCAD Plugin Main Class
+// Main.cs - AutoCAD Plugin Entry Point
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
-using Autodesk.AutoCAD.Windows;
 using System;
-using System.Windows.Forms;
 
 namespace CADCopilot
 {
@@ -11,34 +9,32 @@ namespace CADCopilot
     {
         private ChatUI chatWindow;
         private APIClient apiClient;
-        
+
+        // ✅ Points to your live Render API
+        private const string API_URL = "https://cad-copilot-api.onrender.com";
+
         public void Initialize()
         {
             try
             {
-                // Initialize API client
-                apiClient = new APIClient("http://localhost:8000");
-                
-                // Add ribbon button
-                AddRibbonButton();
-                
-                // Log initialization
+                apiClient = new APIClient(API_URL);
                 Utilities.LogInfo("CAD Copilot initialized");
+
+                // Show welcome message in AutoCAD command line
+                var doc = Application.DocumentManager.MdiActiveDocument;
+                doc?.Editor.WriteMessage("\nCAD AI Copilot loaded! Type CADCOPILOT to open.\n");
             }
             catch (Exception e)
             {
                 Utilities.LogError("Initialization failed", e);
             }
         }
-        
+
         public void Terminate()
         {
             try
             {
-                if (chatWindow != null)
-                {
-                    chatWindow.Close();
-                }
+                chatWindow?.Close();
                 Utilities.LogInfo("CAD Copilot terminated");
             }
             catch (Exception e)
@@ -46,8 +42,8 @@ namespace CADCopilot
                 Utilities.LogError("Termination error", e);
             }
         }
-        
-        [CommandMethod("CADCopilotOpen")]
+
+        [CommandMethod("CADCOPILOT")]
         public void OpenCADCopilot()
         {
             try
@@ -59,6 +55,7 @@ namespace CADCopilot
                 }
                 else
                 {
+                    chatWindow.BringToFront();
                     chatWindow.Focus();
                 }
             }
@@ -66,12 +63,6 @@ namespace CADCopilot
             {
                 Utilities.LogError("Open window error", e);
             }
-        }
-        
-        private void AddRibbonButton()
-        {
-            // Placeholder for ribbon button creation
-            // In real implementation, would add button to AutoCAD ribbon
         }
     }
 }
