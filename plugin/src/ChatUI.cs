@@ -1,4 +1,3 @@
-// ChatUI.cs - VS Code Copilot Style Chat Panel
 using System;
 using System.Drawing;
 using System.Windows.Forms;
@@ -19,33 +18,28 @@ namespace CADCopilot
         private Label statusLabel;
         private Panel topPanel;
         private Panel bottomPanel;
-
         private APIClient apiClient;
-        private AutoCADDrawing cadDrawing;
+        private AutoCADDrawing cadDrawing = null;
         private string currentFileId = null;
         private string currentExcelId = null;
         private string currentOutputId = null;
 
-        // VS Code dark theme colors
         private readonly Color BG_DARK = Color.FromArgb(30, 30, 30);
         private readonly Color BG_PANEL = Color.FromArgb(37, 37, 38);
         private readonly Color BG_INPUT = Color.FromArgb(60, 60, 60);
         private readonly Color TEXT_WHITE = Color.FromArgb(212, 212, 212);
         private readonly Color ACCENT_BLUE = Color.FromArgb(0, 122, 204);
         private readonly Color ACCENT_GREEN = Color.FromArgb(78, 201, 176);
-        private readonly Color MSG_USER = Color.FromArgb(45, 45, 48);
-        private readonly Color MSG_AI = Color.FromArgb(37, 37, 38);
 
         public ChatUI(APIClient client)
         {
             apiClient = client;
-            cadDrawing = new AutoCADDrawing();
+            // cadDrawing initialized lazily — NOT here, avoids crash on load
             InitializeComponents();
         }
 
         private void InitializeComponents()
         {
-            // Form
             this.Text = "CAD AI Copilot";
             this.Width = 420;
             this.Height = 700;
@@ -56,7 +50,6 @@ namespace CADCopilot
             this.Location = new Point(Screen.PrimaryScreen.WorkingArea.Width - 440, 100);
             this.Font = new Font("Segoe UI", 9f);
 
-            // ===== TOP PANEL — File Upload Buttons =====
             topPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -67,25 +60,25 @@ namespace CADCopilot
 
             var titleLabel = new Label
             {
-                Text = "⚡ CAD AI Copilot",
+                Text = "CAD AI Copilot",
                 ForeColor = ACCENT_BLUE,
                 Font = new Font("Segoe UI", 11f, FontStyle.Bold),
                 Location = new Point(8, 8),
                 AutoSize = true
             };
 
-            uploadDwgButton = CreateButton("📁 Upload DWG", 8, 35, ACCENT_BLUE);
+            uploadDwgButton = CreateButton("Upload DWG", 8, 35, ACCENT_BLUE);
             uploadDwgButton.Click += UploadDwg_Click;
 
-            uploadExcelButton = CreateButton("📊 Upload Excel", 210, 35, ACCENT_BLUE);
+            uploadExcelButton = CreateButton("Upload Excel", 210, 35, ACCENT_BLUE);
             uploadExcelButton.Click += UploadExcel_Click;
 
-            autoDrawButton = CreateButton("🤖 Auto Draw LPS", 8, 70, ACCENT_GREEN);
+            autoDrawButton = CreateButton("Auto Draw LPS", 8, 70, ACCENT_GREEN);
             autoDrawButton.Width = 190;
             autoDrawButton.Enabled = false;
             autoDrawButton.Click += AutoDraw_Click;
 
-            downloadButton = CreateButton("⬇ Download DWG", 210, 70, Color.FromArgb(100, 100, 100));
+            downloadButton = CreateButton("Download DWG", 210, 70, Color.FromArgb(100, 100, 100));
             downloadButton.Enabled = false;
             downloadButton.Click += Download_Click;
 
@@ -93,7 +86,6 @@ namespace CADCopilot
                 titleLabel, uploadDwgButton, uploadExcelButton, autoDrawButton, downloadButton
             });
 
-            // ===== MESSAGE HISTORY =====
             messageHistory = new RichTextBox
             {
                 Dock = DockStyle.Fill,
@@ -106,7 +98,6 @@ namespace CADCopilot
                 ScrollBars = RichTextBoxScrollBars.Vertical
             };
 
-            // ===== BOTTOM PANEL — Chat Input =====
             bottomPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
@@ -132,10 +123,12 @@ namespace CADCopilot
                 BackColor = BG_INPUT,
                 ForeColor = TEXT_WHITE,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f),
-                PlaceholderText = "Type a command... e.g. Move corridor north 5m"
+                Font = new Font("Segoe UI", 10f)
             };
-            commandInput.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { SendButton_Click(s, e); e.Handled = true; } };
+            commandInput.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { SendButton_Click(s, e); e.Handled = true; }
+            };
 
             sendButton = new Button
             {
@@ -154,7 +147,6 @@ namespace CADCopilot
 
             bottomPanel.Controls.AddRange(new Control[] { statusLabel, commandInput, sendButton });
 
-            // ===== ASSEMBLE =====
             this.Controls.Add(messageHistory);
             this.Controls.Add(topPanel);
             this.Controls.Add(bottomPanel);
@@ -162,138 +154,161 @@ namespace CADCopilot
             AddMessage("system", "Welcome to CAD AI Copilot! Upload your DWG and Excel files to begin.");
         }
 
-        // ===== UPLOAD DWG =====
         private async void UploadDwg_Click(object sender, EventArgs e)
         {
-            using var dialog = new OpenFileDialog { Filter = "DWG Files|*.dwg", Title = "Select DWG File" };
-            if (dialog.ShowDialog() != DialogResult.OK) return;
-
-            SetStatus("Uploading DWG...");
-            uploadDwgButton.Enabled = false;
-
-            currentFileId = await apiClient.UploadDwg(dialog.FileName);
-
-            if (currentFileId != null)
+            try
             {
-                uploadDwgButton.Text = "✅ DWG Uploaded";
-                AddMessage("system", $"DWG uploaded successfully.");
-                CheckAutoDrawReady();
+                using var dialog = new OpenFileDialog { Filter = "DWG Files|*.dwg", Title = "Select DWG File" };
+                if (dialog.ShowDialog() != DialogResult.OK) return;
+                SetStatus("Uploading DWG...");
+                uploadDwgButton.Enabled = false;
+                currentFileId = await apiClient.UploadDwg(dialog.FileName);
+                if (currentFileId != null)
+                {
+                    uploadDwgButton.Text = "DWG Uploaded";
+                    AddMessage("system", "DWG uploaded successfully.");
+                    CheckAutoDrawReady();
+                }
+                else
+                {
+                    AddMessage("error", "DWG upload failed. Check your connection.");
+                    uploadDwgButton.Enabled = true;
+                }
+                SetStatus("");
             }
-            else
+            catch (System.Exception ex)
             {
-                AddMessage("error", "DWG upload failed. Check your connection.");
+                AddMessage("error", $"DWG upload error: {ex.Message}");
                 uploadDwgButton.Enabled = true;
+                SetStatus("");
             }
-
-            SetStatus("");
         }
 
-        // ===== UPLOAD EXCEL =====
         private async void UploadExcel_Click(object sender, EventArgs e)
         {
-            using var dialog = new OpenFileDialog { Filter = "Excel Files|*.xlsx;*.xls", Title = "Select Excel LPS File" };
-            if (dialog.ShowDialog() != DialogResult.OK) return;
-
-            SetStatus("Uploading Excel...");
-            uploadExcelButton.Enabled = false;
-
-            currentExcelId = await apiClient.UploadExcel(dialog.FileName);
-
-            if (currentExcelId != null)
+            try
             {
-                uploadExcelButton.Text = "✅ Excel Uploaded";
-                AddMessage("system", $"Excel LPS file uploaded successfully.");
-                CheckAutoDrawReady();
+                using var dialog = new OpenFileDialog { Filter = "Excel Files|*.xlsx;*.xls", Title = "Select Excel LPS File" };
+                if (dialog.ShowDialog() != DialogResult.OK) return;
+                SetStatus("Uploading Excel...");
+                uploadExcelButton.Enabled = false;
+                currentExcelId = await apiClient.UploadExcel(dialog.FileName);
+                if (currentExcelId != null)
+                {
+                    uploadExcelButton.Text = "Excel Uploaded";
+                    AddMessage("system", "Excel LPS file uploaded successfully.");
+                    CheckAutoDrawReady();
+                }
+                else
+                {
+                    AddMessage("error", "Excel upload failed. Check your connection.");
+                    uploadExcelButton.Enabled = true;
+                }
+                SetStatus("");
             }
-            else
+            catch (System.Exception ex)
             {
-                AddMessage("error", "Excel upload failed. Check your connection.");
+                AddMessage("error", $"Excel upload error: {ex.Message}");
                 uploadExcelButton.Enabled = true;
+                SetStatus("");
             }
-
-            SetStatus("");
         }
 
-        // ===== AUTO DRAW =====
         private async void AutoDraw_Click(object sender, EventArgs e)
         {
-            SetStatus("AI is drawing transmission lines...");
-            autoDrawButton.Enabled = false;
-            AddMessage("ai", "Starting auto-draw... This may take a moment.");
-
-            var (outputId, parcels) = await apiClient.AutoDraw(currentFileId, currentExcelId);
-
-            if (outputId != null)
+            try
             {
-                currentOutputId = outputId;
-                downloadButton.Enabled = true;
-                downloadButton.BackColor = ACCENT_GREEN;
-                AddMessage("ai", $"✅ Done! Drew {parcels} land parcels with corridors and labels. Click Download DWG to get your file.");
+                SetStatus("AI is drawing transmission lines...");
+                autoDrawButton.Enabled = false;
+                AddMessage("ai", "Starting auto-draw... This may take a moment.");
+                var (outputId, parcels) = await apiClient.AutoDraw(currentFileId, currentExcelId);
+                if (outputId != null)
+                {
+                    currentOutputId = outputId;
+                    downloadButton.Enabled = true;
+                    downloadButton.BackColor = ACCENT_GREEN;
+                    AddMessage("ai", $"Done! Drew {parcels} land parcels. Click Download DWG to get your file.");
+                }
+                else
+                {
+                    AddMessage("error", "Auto-draw failed. Please try again.");
+                    autoDrawButton.Enabled = true;
+                }
+                SetStatus("");
             }
-            else
+            catch (System.Exception ex)
             {
-                AddMessage("error", "Auto-draw failed. Please try again.");
+                AddMessage("error", $"Auto-draw error: {ex.Message}");
                 autoDrawButton.Enabled = true;
+                SetStatus("");
             }
-
-            SetStatus("");
         }
 
-        // ===== DOWNLOAD =====
         private async void Download_Click(object sender, EventArgs e)
         {
-            using var dialog = new SaveFileDialog { Filter = "DWG Files|*.dwg", FileName = "lps_output.dwg" };
-            if (dialog.ShowDialog() != DialogResult.OK) return;
-
-            SetStatus("Downloading...");
-            string saved = await apiClient.DownloadOutput(currentOutputId, dialog.FileName);
-
-            if (saved != null)
-                AddMessage("system", $"✅ File saved to: {saved}");
-            else
-                AddMessage("error", "Download failed.");
-
-            SetStatus("");
+            try
+            {
+                using var dialog = new SaveFileDialog { Filter = "DWG Files|*.dwg", FileName = "lps_output.dwg" };
+                if (dialog.ShowDialog() != DialogResult.OK) return;
+                SetStatus("Downloading...");
+                string saved = await apiClient.DownloadOutput(currentOutputId, dialog.FileName);
+                if (saved != null)
+                    AddMessage("system", $"File saved to: {saved}");
+                else
+                    AddMessage("error", "Download failed.");
+                SetStatus("");
+            }
+            catch (System.Exception ex)
+            {
+                AddMessage("error", $"Download error: {ex.Message}");
+                SetStatus("");
+            }
         }
 
-        // ===== SEND COMMAND =====
         private async void SendButton_Click(object sender, EventArgs e)
         {
-            string command = commandInput.Text.Trim();
-            if (string.IsNullOrEmpty(command)) return;
-            if (currentFileId == null) { AddMessage("error", "Please upload a DWG file first."); return; }
-
-            commandInput.Text = "";
-            AddMessage("user", command);
-            SetStatus("AI thinking...");
-            sendButton.Enabled = false;
-
-            string response = await apiClient.ExecuteCommand(currentFileId, command);
-
-            if (response != null)
+            try
             {
-                AddMessage("ai", response);
-                // Draw result on AutoCAD canvas
-                try { cadDrawing.DrawFromApiResponse(response); }
-                catch { }
+                string command = commandInput.Text.Trim();
+                if (string.IsNullOrEmpty(command)) return;
+                if (currentFileId == null) { AddMessage("error", "Please upload a DWG file first."); return; }
+                commandInput.Text = "";
+                AddMessage("user", command);
+                SetStatus("AI thinking...");
+                sendButton.Enabled = false;
+                string response = await apiClient.ExecuteCommand(currentFileId, command);
+                if (response != null)
+                {
+                    AddMessage("ai", response);
+                    try
+                    {
+                        if (cadDrawing == null) cadDrawing = new AutoCADDrawing();
+                        cadDrawing.DrawFromApiResponse(response);
+                    }
+                    catch { }
+                }
+                else
+                {
+                    AddMessage("error", "Command failed. Try again.");
+                }
+                sendButton.Enabled = true;
+                SetStatus("");
             }
-            else
+            catch (System.Exception ex)
             {
-                AddMessage("error", "Command failed. Try again.");
+                AddMessage("error", $"Command error: {ex.Message}");
+                sendButton.Enabled = true;
+                SetStatus("");
             }
-
-            sendButton.Enabled = true;
-            SetStatus("");
         }
 
-        // ===== HELPERS =====
         private void CheckAutoDrawReady()
         {
             if (currentFileId != null && currentExcelId != null)
             {
                 autoDrawButton.Enabled = true;
                 autoDrawButton.BackColor = ACCENT_GREEN;
-                AddMessage("system", "Both files ready! Click 'Auto Draw LPS' to start.");
+                AddMessage("system", "Both files ready! Click Auto Draw LPS to start.");
             }
         }
 
@@ -304,7 +319,6 @@ namespace CADCopilot
                 messageHistory.Invoke(new Action(() => AddMessage(type, message)));
                 return;
             }
-
             Color color = type switch
             {
                 "user" => Color.FromArgb(100, 180, 255),
@@ -312,15 +326,13 @@ namespace CADCopilot
                 "error" => Color.FromArgb(255, 100, 100),
                 _ => Color.Gray
             };
-
             string prefix = type switch
             {
                 "user" => "You",
                 "ai" => "AI",
-                "error" => "⚠",
-                _ => "•"
+                "error" => "Error",
+                _ => "System"
             };
-
             messageHistory.SelectionColor = color;
             messageHistory.AppendText($"{prefix}: {message}{Environment.NewLine}{Environment.NewLine}");
             messageHistory.ScrollToCaret();

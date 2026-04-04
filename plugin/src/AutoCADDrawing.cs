@@ -4,7 +4,7 @@ using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CADCopilot
 {
@@ -102,22 +102,24 @@ namespace CADCopilot
         {
             try
             {
-                var doc = JsonDocument.Parse(jsonResponse);
-                var result = doc.RootElement.GetProperty("result");
+                var doc = JObject.Parse(jsonResponse);
+                var result = doc["result"] as JObject;
+                if (result == null) return;
 
-                string type = result.TryGetProperty("type", out var t) ? t.GetString() : "";
+                string type = (string)result["type"] ?? "";
 
-                if (type == "polygon" && result.TryGetProperty("points", out var pts))
+                if (type == "polygon" && result["points"] != null)
                 {
                     var points = new List<(double x, double y)>();
-                    foreach (var pt in pts.EnumerateArray())
-                        points.Add((pt[0].GetDouble(), pt[1].GetDouble()));
+                    foreach (var pt in (JArray)result["points"])
+                        points.Add(((double)pt[0], (double)pt[1]));
                     DrawPolygon(points);
                 }
-                else if (type == "dimension" && result.TryGetProperty("point1", out var p1))
+                else if (type == "dimension" && result["point1"] != null)
                 {
-                    var p2 = result.GetProperty("point2");
-                    DrawLine(p1[0].GetDouble(), p1[1].GetDouble(), p2[0].GetDouble(), p2[1].GetDouble());
+                    var p1 = (JArray)result["point1"];
+                    var p2 = (JArray)result["point2"];
+                    DrawLine((double)p1[0], (double)p1[1], (double)p2[0], (double)p2[1]);
                 }
             }
             catch (Exception e) { Utilities.LogError("DrawFromApiResponse failed", e); }

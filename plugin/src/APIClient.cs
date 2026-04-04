@@ -1,9 +1,9 @@
 // APIClient.cs - API Communication
 using System;
 using System.Net.Http;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.IO;
+using Newtonsoft.Json.Linq;
 
 namespace CADCopilot
 {
@@ -29,8 +29,8 @@ namespace CADCopilot
 
                 var response = await httpClient.PostAsync($"{baseUrl}/upload", content);
                 var json = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(json);
-                return doc.RootElement.GetProperty("file_id").GetString();
+                var doc = JObject.Parse(json);
+                return (string)doc["file_id"];
             }
             catch (Exception e)
             {
@@ -50,8 +50,8 @@ namespace CADCopilot
 
                 var response = await httpClient.PostAsync($"{baseUrl}/upload-excel", content);
                 var json = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(json);
-                return doc.RootElement.GetProperty("excel_id").GetString();
+                var doc = JObject.Parse(json);
+                return (string)doc["excel_id"];
             }
             catch (Exception e)
             {
@@ -68,9 +68,9 @@ namespace CADCopilot
                 var url = $"{baseUrl}/auto-draw?file_id={fileId}&excel_id={excelId}";
                 var response = await httpClient.PostAsync(url, null);
                 var json = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(json);
-                var outputId = doc.RootElement.GetProperty("output_id").GetString();
-                var parcels = doc.RootElement.GetProperty("parcels_drawn").GetInt32();
+                var doc = JObject.Parse(json);
+                var outputId = (string)doc["output_id"];
+                var parcels = (int)doc["parcels_drawn"];
                 return (outputId, parcels);
             }
             catch (Exception e)
@@ -88,10 +88,10 @@ namespace CADCopilot
                 var url = $"{baseUrl}/command?file_id={fileId}&command_text={Uri.EscapeDataString(command)}";
                 var response = await httpClient.PostAsync(url, null);
                 var json = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(json);
+                var doc = JObject.Parse(json);
 
-                if (doc.RootElement.TryGetProperty("result", out var result))
-                    return result.ToString();
+                if (doc.ContainsKey("result"))
+                    return (string)doc["result"];
 
                 return json;
             }

@@ -1,7 +1,9 @@
 // Main.cs - AutoCAD Plugin Entry Point
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
-using System;
+
+[assembly: ExtensionApplication(typeof(CADCopilot.CADCopilotPlugin))]
+[assembly: CommandClass(typeof(CADCopilot.CADCopilotPlugin))]
 
 namespace CADCopilot
 {
@@ -10,7 +12,6 @@ namespace CADCopilot
         private ChatUI chatWindow;
         private APIClient apiClient;
 
-        // ✅ Points to your live Render API
         private const string API_URL = "https://cad-copilot-api.onrender.com";
 
         public void Initialize()
@@ -20,11 +21,10 @@ namespace CADCopilot
                 apiClient = new APIClient(API_URL);
                 Utilities.LogInfo("CAD Copilot initialized");
 
-                // Show welcome message in AutoCAD command line
                 var doc = Application.DocumentManager.MdiActiveDocument;
                 doc?.Editor.WriteMessage("\nCAD AI Copilot loaded! Type CADCOPILOT to open.\n");
             }
-            catch (Exception e)
+            catch (System.Exception e)
             {
                 Utilities.LogError("Initialization failed", e);
             }
@@ -37,7 +37,7 @@ namespace CADCopilot
                 chatWindow?.Close();
                 Utilities.LogInfo("CAD Copilot terminated");
             }
-            catch (Exception e)
+            catch (System.Exception e)
             {
                 Utilities.LogError("Termination error", e);
             }
@@ -48,6 +48,10 @@ namespace CADCopilot
         {
             try
             {
+                // Ensure apiClient exists even if Initialize() failed
+                if (apiClient == null)
+                    apiClient = new APIClient(API_URL);
+
                 if (chatWindow == null || chatWindow.IsDisposed)
                 {
                     chatWindow = new ChatUI(apiClient);
@@ -59,7 +63,7 @@ namespace CADCopilot
                     chatWindow.Focus();
                 }
             }
-            catch (Exception e)
+            catch (System.Exception e)
             {
                 Utilities.LogError("Open window error", e);
             }
