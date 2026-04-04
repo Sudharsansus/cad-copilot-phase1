@@ -1,66 +1,96 @@
-# command_handler.py - Chat Command Parser
+# command_handler.py - AI Command Processing
+import os
 import json
-from typing import Dict, Any, Optional
 from openai import OpenAI
-from app.utils.helpers import log_info, log_error
+from .system_prompt import SYSTEM_PROMPT
 
 class CommandHandler:
-    def __init__(self, api_key: str):
+    def __init__(self):
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
         self.client = OpenAI(api_key=api_key)
-        self.operations = ["buffer", "shift", "merge", "rotate", "dimension"]
+        self.model = "gpt-4o-mini"  # Fast + cheap, perfect for commands
+        self.conversation_history = []
 
-    def parse_command(self, command_text: str) -> Optional[Dict[str, Any]]:
+    def process_command(self, command: str, file_id: str = None, context: dict = None) -> dict:
+        """
+        Process a natural language CAD command and return structured JSON response.
+        Maintains conversation history for context-aware responses.
+        """
         try:
-            log_info(f"Parsing command: {command_text}")
+            # Build context message if file/parcel data available
+            context_msg = ""
+            if context:
+                context_msg = f"\nCurrent drawing context: {json.dumps(context)}"
 
-            prompt = f"""
-            Parse this AutoCAD command and return JSON:
-            Command: "{command_text}"
+            # Add user message to history
+            self.conversation_history.append({
+                "role": "user",
+                "content": f"{command}{context_msg}"
+            })
 
-            Return ONLY JSON with:
-            - operation: one of {self.operations}
-            - element_type: what to modify
-            - parameters: dictionary of parameters
+            # Keep history to last 10 messages to avoid token overflow
+            recent_history = self.conversation_history[-10:]
 
-            Example:
-            {{"operation": "buffer", "element_type": "corridor", "parameters": {{"distance": 2.0}}}}
-            """
-
+            # Call OpenAI API
             response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=200
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    *recent_history
+                ],
+                temperature=0.1,  # Low temperature = consistent, precise responses
+                max_tokens=500,
+                response_format={"type": "json_object"}  # Force JSON response
             )
 
-            result_text = response.choices[0].message.content
-            result = json.loads(result_text)
+            # Extract response content
+            content = response.choices[0].message.content
 
-            if result.get("operation") not in self.operations:
-                log_error(f"Invalid operation: {result.get('operation')}")
-                return None
+            # Add assistant response to history
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": content
+            })
 
-            log_info(f"Parsed operation: {result.get('operation')}")
+            # Parse JSON response
+            result = json.loads(content)
+
+            # Ensure result field always exists
+            if "result" not in result:
+                result["result"] = "Command processed successfully"
+
             return result
 
+        except json.JSONDecodeError as e:
+            return {
+                "action": "error",
+                "result": f"AI response parsing failed: {str(e)}"
+            }
         except Exception as e:
-            log_error("Command parsing failed", e)
-            return None
+            return {
+                "action": "error", 
+                "result": f"Command processing failed: {str(e)}"
+            }
 
-    def validate_parameters(self, operation: str, params: Dict) -> bool:
-        if operation == "buffer":
-            return "distance" in params and isinstance(params["distance"], (int, float))
-        elif operation == "shift":
-            return "direction" in params and "distance" in params
-        elif operation == "merge":
-            return "elements" in params and len(params["elements"]) >= 2
-        elif operation == "rotate":
-            return "angle" in params and isinstance(params["angle"], (int, float))
-        elif operation == "dimension":
-            return "element1" in params and "element2" in params
-        return False
+    def clear_history(self):
+        """Clear conversation history for new drawing session"""
+        self.conversation_history = []
 
-
-def parse_command(command_text: str, api_key: str) -> Optional[Dict[str, Any]]:
-    handler = CommandHandler(api_key)
-    return handler.parse_command(command_text)
+    def get_drawing_summary(self, parcels: list) -> str:
+        """Generate a summary of the current drawing for AI context"""
+        if not parcels:
+            return "No parcels loaded"
+        
+        summary = f"Drawing has {len(parcels)} land parcels:\n"
+        for p in parcels[:5]:  # First 5 parcels as context
+            summary += f"- SF {p.get('sf_no', 'N/A')}: "
+            summary += f"{p.get('village', 'N/A')}, "
+            summary += f"Owner: {p.get('owner', 'N/A')}, "
+            summary += f"Corridor: {p.get('corridor_sqm', 0)} sqm\n"
+        
+        if len(parcels) > 5:
+            summary += f"... and {len(parcels) - 5} more parcels"
+        
+        return summary
