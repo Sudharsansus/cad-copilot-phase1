@@ -19,7 +19,7 @@ def draw_lps(dwg_path: str, parcels: List[Dict], output_path: str):
             _draw_parcel(msp, parcel, i, bounds)
 
         # Save in R2013 format — compatible with AutoCAD 2013 to 2024
-        doc.saveas(output_path, version="R2013")
+        doc.saveas(output_path)
         log_info(f"LPS drawing saved: {output_path}")
 
     except Exception as e:
