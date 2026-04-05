@@ -1,4 +1,4 @@
-// ChatUI.cs - VS Code Copilot Style Chat Panel (Fixed Layout v2)
+// ChatUI.cs - VS Code Copilot Style Chat Panel (Live Drawing Update)
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -30,6 +30,7 @@ namespace CADCopilot
         private string currentFileId   = null;
         private string currentExcelId  = null;
         private string currentOutputId = null;
+        private string currentFilePath = null; // store local path for live open
 
         private readonly Color VS_BG       = Color.FromArgb(30, 30, 30);
         private readonly Color VS_PANEL    = Color.FromArgb(37, 37, 38);
@@ -109,7 +110,11 @@ namespace CADCopilot
                 Text = "beta", Font = new Font("Segoe UI", 7f),
                 ForeColor = VS_GRAY, Location = new Point(155, 15), AutoSize = true
             };
-            var dot = new Panel { Size = new Size(10, 10), BackColor = Color.Transparent, Location = new Point(395, 18) };
+            var dot = new Panel
+            {
+                Size = new Size(10, 10), BackColor = Color.Transparent,
+                Location = new Point(395, 18)
+            };
             dot.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -124,18 +129,18 @@ namespace CADCopilot
             };
 
             // ── BUTTONS PANEL ─────────────────────────
-            // 10 + 32 + 6 + 32 + 6 + 32 + 6 + 16 + 8 = 148
             buttonsPanel = new Panel { Dock = DockStyle.Top, Height = 148, BackColor = VS_PANEL };
 
-            int bW = 192; int bH = 32;
-            int col1 = 10; int col2 = 212;
-            int row1Y = 10; int row2Y = 50; int row3Y = 90;
+            int bW = 192, bH = 32;
+            int col1 = 10, col2 = 212;
+            int row1Y = 10, row2Y = 50, row3Y = 90;
 
             uploadDwgButton   = MakeBtn("📁  Upload DWG/DXF", col1, row1Y, bW, bH, VS_BLUE);
             uploadExcelButton = MakeBtn("📊  Upload Excel",    col2, row1Y, bW, bH, VS_BLUE);
             autoDrawButton    = MakeBtn("🤖  Auto Draw LPS",   col1, row2Y, bW, bH, Color.FromArgb(55, 55, 55));
             downloadButton    = MakeBtn("⬇  Download DXF",    col2, row2Y, bW, bH, Color.FromArgb(55, 55, 55));
             resetButton       = MakeBtn("🔄  Re-upload Files", col1, row3Y, bW, bH, Color.FromArgb(80, 50, 10));
+
             autoDrawButton.Enabled = false;
             downloadButton.Enabled = false;
 
@@ -380,26 +385,45 @@ namespace CADCopilot
 
                 if (currentFileId != null)
                 {
+                    currentFilePath           = dlg.FileName;
                     uploadDwgButton.Text      = "✅  CAD Ready";
-                    uploadDwgButton.BackColor  = Color.FromArgb(28, 68, 28);
+                    uploadDwgButton.BackColor = Color.FromArgb(28, 68, 28);
                     AddBubble("system", "CAD file uploaded: " + Path.GetFileName(dlg.FileName));
+
+                    // ── LIVE DRAWING: open file in AutoCAD immediately ──
+                    try
+                    {
+                        if (cadDrawing == null) cadDrawing = new AutoCADDrawing();
+                        cadDrawing.OpenFile(currentFilePath);
+                        AddBubble("system",
+                            "📐 Opened in AutoCAD for live editing.\n" +
+                            "AI draw commands will appear directly on screen.");
+                    }
+                    catch (Exception openEx)
+                    {
+                        // AutoCAD may not be running — not a fatal error
+                        AddBubble("system",
+                            "CAD file ready (AutoCAD live preview unavailable: " +
+                            openEx.Message + ")");
+                    }
+
                     CheckReady();
                 }
                 else
                 {
                     AddBubble("error", "Upload failed. Check your internet connection.");
                     uploadDwgButton.Text      = "📁  Upload DWG/DXF";
-                    uploadDwgButton.BackColor  = VS_BLUE;
-                    uploadDwgButton.Enabled    = true;
+                    uploadDwgButton.BackColor = VS_BLUE;
+                    uploadDwgButton.Enabled   = true;
                 }
                 SetStatus("", VS_GRAY);
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 AddBubble("error", "Upload error: " + ex.Message);
                 uploadDwgButton.Text      = "📁  Upload DWG/DXF";
-                uploadDwgButton.BackColor  = VS_BLUE;
-                uploadDwgButton.Enabled    = true;
+                uploadDwgButton.BackColor = VS_BLUE;
+                uploadDwgButton.Enabled   = true;
                 SetStatus("", VS_GRAY);
             }
         }
@@ -421,7 +445,7 @@ namespace CADCopilot
                 if (currentExcelId != null)
                 {
                     uploadExcelButton.Text      = "✅  Excel Ready";
-                    uploadExcelButton.BackColor  = Color.FromArgb(28, 68, 28);
+                    uploadExcelButton.BackColor = Color.FromArgb(28, 68, 28);
                     AddBubble("system", "LPS Book uploaded: " + Path.GetFileName(dlg.FileName));
                     CheckReady();
                 }
@@ -429,17 +453,17 @@ namespace CADCopilot
                 {
                     AddBubble("error", "Excel upload failed. Check your connection.");
                     uploadExcelButton.Text      = "📊  Upload Excel";
-                    uploadExcelButton.BackColor  = VS_BLUE;
-                    uploadExcelButton.Enabled    = true;
+                    uploadExcelButton.BackColor = VS_BLUE;
+                    uploadExcelButton.Enabled   = true;
                 }
                 SetStatus("", VS_GRAY);
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 AddBubble("error", "Upload error: " + ex.Message);
                 uploadExcelButton.Text      = "📊  Upload Excel";
-                uploadExcelButton.BackColor  = VS_BLUE;
-                uploadExcelButton.Enabled    = true;
+                uploadExcelButton.BackColor = VS_BLUE;
+                uploadExcelButton.Enabled   = true;
                 SetStatus("", VS_GRAY);
             }
         }
@@ -483,7 +507,7 @@ namespace CADCopilot
                     autoDrawButton.Enabled   = true;
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 ShowTyping(false);
                 AddBubble("error", "Auto-draw error: " + ex.Message);
@@ -511,7 +535,7 @@ namespace CADCopilot
                     saved != null ? "Saved to:\n" + saved : "Download failed. Try again.");
                 SetStatus("", VS_GRAY);
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 AddBubble("error", "Download error: " + ex.Message);
                 SetStatus("", VS_GRAY);
@@ -520,29 +544,28 @@ namespace CADCopilot
 
         private void Reset_Click(object sender, EventArgs e)
         {
-            // Clear all state
             currentFileId   = null;
             currentExcelId  = null;
             currentOutputId = null;
+            currentFilePath = null;
+            cadDrawing      = null; // reset live drawing session too
 
-            // Reset upload buttons
             uploadDwgButton.Text      = "📁  Upload DWG/DXF";
-            uploadDwgButton.BackColor  = VS_BLUE;
-            uploadDwgButton.Enabled    = true;
+            uploadDwgButton.BackColor = VS_BLUE;
+            uploadDwgButton.Enabled   = true;
 
             uploadExcelButton.Text      = "📊  Upload Excel";
-            uploadExcelButton.BackColor  = VS_BLUE;
-            uploadExcelButton.Enabled    = true;
+            uploadExcelButton.BackColor = VS_BLUE;
+            uploadExcelButton.Enabled   = true;
 
-            // Reset action buttons
             autoDrawButton.Text      = "🤖  Auto Draw LPS";
-            autoDrawButton.BackColor  = Color.FromArgb(55, 55, 55);
-            autoDrawButton.ForeColor  = Color.White;
-            autoDrawButton.Enabled    = false;
+            autoDrawButton.BackColor = Color.FromArgb(55, 55, 55);
+            autoDrawButton.ForeColor = Color.White;
+            autoDrawButton.Enabled   = false;
 
             downloadButton.Text      = "⬇  Download DXF";
-            downloadButton.BackColor  = Color.FromArgb(55, 55, 55);
-            downloadButton.Enabled    = false;
+            downloadButton.BackColor = Color.FromArgb(55, 55, 55);
+            downloadButton.Enabled   = false;
 
             SetStatus("", VS_GRAY);
             AddBubble("system", "Reset! Upload your DWG/DXF and Excel files again.");
@@ -572,12 +595,12 @@ namespace CADCopilot
                         if (cadDrawing == null) cadDrawing = new AutoCADDrawing();
                         cadDrawing.DrawFromApiResponse(response);
                     }
-                    catch { }
+                    catch { /* AutoCAD may not be active */ }
                 }
                 else
                     AddBubble("error", "Command failed. Please try again.");
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 ShowTyping(false);
                 AddBubble("error", "Error: " + ex.Message);
