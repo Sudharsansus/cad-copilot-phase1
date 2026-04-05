@@ -24,28 +24,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ========== HELPERS ==========
+def find_cad_file(file_id: str) -> str:
+    """Find uploaded CAD file by ID — checks .dxf first, then .dwg"""
+    for ext in (".dxf", ".dwg"):
+        path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
+        if os.path.exists(path):
+            return path
+    return None
+
 # ========== HEALTH ==========
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "CAD AI Copilot", "version": "1.0.0"}
 
 
-# ========== UPLOAD DWG ==========
+# ========== UPLOAD DWG / DXF ==========
 @app.post("/upload")
 async def upload_dwg(file: UploadFile = File(...)):
     try:
-        if not file.filename.endswith('.dwg'):
-            raise HTTPException(status_code=400, detail="File must be .dwg")
+        lower = file.filename.lower()
+        if not (lower.endswith('.dwg') or lower.endswith('.dxf')):
+            raise HTTPException(status_code=400, detail="File must be .dwg or .dxf")
 
-        file_id = generate_file_id()
+        file_id  = generate_file_id()
+        ext      = ".dxf" if lower.endswith('.dxf') else ".dwg"
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-        file_path = os.path.join(UPLOAD_DIR, f"{file_id}.dwg")
+        file_path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
 
         contents = await file.read()
         with open(file_path, "wb") as f:
             f.write(contents)
 
-        log_info(f"DWG uploaded: {file_id}")
+        log_info(f"CAD file uploaded: {file_id}{ext}")
         return {"status": "success", "file_id": file_id, "filename": file.filename}
 
     except HTTPException:
@@ -59,10 +70,10 @@ async def upload_dwg(file: UploadFile = File(...)):
 @app.post("/upload-excel")
 async def upload_excel(file: UploadFile = File(...)):
     try:
-        if not file.filename.endswith(('.xlsx', '.xls')):
+        if not file.filename.lower().endswith(('.xlsx', '.xls')):
             raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
 
-        excel_id = generate_file_id()
+        excel_id  = generate_file_id()
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         file_path = os.path.join(UPLOAD_DIR, f"{excel_id}.xlsx")
 
@@ -80,12 +91,12 @@ async def upload_excel(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ========== PARSE DWG ==========
+# ========== PARSE ==========
 @app.post("/parse")
 async def parse_file(file_id: str):
     try:
-        file_path = os.path.join(UPLOAD_DIR, f"{file_id}.dwg")
-        if not os.path.exists(file_path):
+        file_path = find_cad_file(file_id)
+        if not file_path:
             raise HTTPException(status_code=404, detail="File not found")
 
         result = parse_dwg_file(file_path)
@@ -106,21 +117,19 @@ async def auto_draw(file_id: str, excel_id: str):
         from app.core.excel_parser import parse_excel_file
         from app.core.lps_drawer import draw_lps
 
-        dwg_path = os.path.join(UPLOAD_DIR, f"{file_id}.dwg")
+        cad_path   = find_cad_file(file_id)
         excel_path = os.path.join(UPLOAD_DIR, f"{excel_id}.xlsx")
 
-        if not os.path.exists(dwg_path):
-            raise HTTPException(status_code=404, detail="DWG file not found")
+        if not cad_path:
+            raise HTTPException(status_code=404, detail="CAD file not found. Please re-upload.")
         if not os.path.exists(excel_path):
-            raise HTTPException(status_code=404, detail="Excel file not found")
+            raise HTTPException(status_code=404, detail="Excel file not found. Please re-upload.")
 
-        # Parse Excel LPS data
         lps_data = parse_excel_file(excel_path)
 
-        # Draw on DWG
-        output_id = generate_file_id()
-        output_path = os.path.join(UPLOAD_DIR, f"{output_id}_output.dwg")
-        draw_lps(dwg_path, lps_data, output_path)
+        output_id   = generate_file_id()
+        output_path = os.path.join(UPLOAD_DIR, f"{output_id}_output.dxf")
+        draw_lps(cad_path, lps_data, output_path)
 
         log_info(f"LPS auto-draw complete: {output_id}")
         return {
@@ -145,9 +154,9 @@ async def execute_command(file_id: str, command_text: str):
         if not parsed:
             raise HTTPException(status_code=400, detail="Could not understand command")
 
-        operation = parsed.get("operation")
+        operation  = parsed.get("operation")
         parameters = parsed.get("parameters", {})
-        result = execute_geometry_operation(operation, **parameters)
+        result     = execute_geometry_operation(operation, **parameters)
 
         log_info(f"Command executed: {operation}")
         return {
@@ -167,21 +176,27 @@ async def execute_command(file_id: str, command_text: str):
 # ========== DOWNLOAD OUTPUT ==========
 @app.get("/download/{output_id}")
 async def download_output(output_id: str):
-    file_path = os.path.join(UPLOAD_DIR, f"{output_id}_output.dwg")
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Output file not found")
-    return FileResponse(file_path, filename="lps_output.dwg", media_type="application/octet-stream")
+    # Check for dxf output first, then dwg
+    for ext in ("_output.dxf", "_output.dwg"):
+        file_path = os.path.join(UPLOAD_DIR, f"{output_id}{ext}")
+        if os.path.exists(file_path):
+            fname = "lps_output.dxf" if ext.endswith(".dxf") else "lps_output.dwg"
+            return FileResponse(file_path, filename=fname,
+                                media_type="application/octet-stream")
+    raise HTTPException(status_code=404, detail="Output file not found")
 
 
 # ========== ERROR HANDLERS ==========
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
-    return JSONResponse(status_code=exc.status_code, content={"status": "error", "detail": exc.detail})
+    return JSONResponse(status_code=exc.status_code,
+                        content={"status": "error", "detail": exc.detail})
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     log_error("Unhandled error", exc)
-    return JSONResponse(status_code=500, content={"status": "error", "detail": "Internal server error"})
+    return JSONResponse(status_code=500,
+                        content={"status": "error", "detail": "Internal server error"})
 
 
 # ========== RUN ==========
