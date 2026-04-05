@@ -20,6 +20,7 @@ namespace CADCopilot
         private Button uploadExcelButton;
         private Button autoDrawButton;
         private Button downloadButton;
+        private Button resetButton;
         private Label statusLabel;
         private Timer typingTimer;
         private int typingDots = 0;
@@ -108,7 +109,7 @@ namespace CADCopilot
                 Text = "beta", Font = new Font("Segoe UI", 7f),
                 ForeColor = VS_GRAY, Location = new Point(155, 15), AutoSize = true
             };
-            var dot = new Panel { Size = new Size(10,10), BackColor = Color.Transparent, Location = new Point(395,18) };
+            var dot = new Panel { Size = new Size(10, 10), BackColor = Color.Transparent, Location = new Point(395, 18) };
             dot.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -119,21 +120,22 @@ namespace CADCopilot
             headerPanel.Paint += (s, e) =>
             {
                 using var p = new Pen(VS_BORDER);
-                e.Graphics.DrawLine(p, 0, headerPanel.Height-1, headerPanel.Width, headerPanel.Height-1);
+                e.Graphics.DrawLine(p, 0, headerPanel.Height - 1, headerPanel.Width, headerPanel.Height - 1);
             };
 
             // ── BUTTONS PANEL ─────────────────────────
-            buttonsPanel = new Panel { Dock = DockStyle.Top, Height = 110, BackColor = VS_PANEL };
+            // 10 + 32 + 6 + 32 + 6 + 32 + 6 + 16 + 8 = 148
+            buttonsPanel = new Panel { Dock = DockStyle.Top, Height = 148, BackColor = VS_PANEL };
 
             int bW = 192; int bH = 32;
             int col1 = 10; int col2 = 212;
-            int row1Y = 10; int row2Y = 50;
+            int row1Y = 10; int row2Y = 50; int row3Y = 90;
 
-            // ↓ CHANGED: label now says "DWG / DXF"
             uploadDwgButton   = MakeBtn("📁  Upload DWG/DXF", col1, row1Y, bW, bH, VS_BLUE);
             uploadExcelButton = MakeBtn("📊  Upload Excel",    col2, row1Y, bW, bH, VS_BLUE);
-            autoDrawButton    = MakeBtn("🤖  Auto Draw LPS",   col1, row2Y, bW, bH, Color.FromArgb(55,55,55));
-            downloadButton    = MakeBtn("⬇  Download DXF",    col2, row2Y, bW, bH, Color.FromArgb(55,55,55));
+            autoDrawButton    = MakeBtn("🤖  Auto Draw LPS",   col1, row2Y, bW, bH, Color.FromArgb(55, 55, 55));
+            downloadButton    = MakeBtn("⬇  Download DXF",    col2, row2Y, bW, bH, Color.FromArgb(55, 55, 55));
+            resetButton       = MakeBtn("🔄  Re-upload Files", col1, row3Y, bW, bH, Color.FromArgb(80, 50, 10));
             autoDrawButton.Enabled = false;
             downloadButton.Enabled = false;
 
@@ -141,21 +143,22 @@ namespace CADCopilot
             uploadExcelButton.Click += UploadExcel_Click;
             autoDrawButton.Click    += AutoDraw_Click;
             downloadButton.Click    += Download_Click;
+            resetButton.Click       += Reset_Click;
 
             statusLabel = new Label
             {
-                Text = "Upload DWG/DXF and Excel LPS Book to start",
+                Text      = "Upload DWG/DXF and Excel LPS Book to start",
                 ForeColor = VS_GRAY, Font = new Font("Segoe UI", 7.5f),
-                Location = new Point(col1, 90), Size = new Size(400, 14),
+                Location  = new Point(col1, 130), Size = new Size(400, 14),
                 BackColor = Color.Transparent
             };
 
             buttonsPanel.Controls.AddRange(new Control[]
-                { uploadDwgButton, uploadExcelButton, autoDrawButton, downloadButton, statusLabel });
+                { uploadDwgButton, uploadExcelButton, autoDrawButton, downloadButton, resetButton, statusLabel });
             buttonsPanel.Paint += (s, e) =>
             {
                 using var p = new Pen(VS_BORDER);
-                e.Graphics.DrawLine(p, 0, buttonsPanel.Height-1, buttonsPanel.Width, buttonsPanel.Height-1);
+                e.Graphics.DrawLine(p, 0, buttonsPanel.Height - 1, buttonsPanel.Width, buttonsPanel.Height - 1);
             };
 
             // ── INPUT PANEL ───────────────────────────
@@ -169,16 +172,16 @@ namespace CADCopilot
 
             var inputWrap = new Panel
             {
-                Tag = "inputWrap", Location = new Point(10,10),
-                Size = new Size(10,36), BackColor = VS_INPUT_BG
+                Tag = "inputWrap", Location = new Point(10, 10),
+                Size = new Size(10, 36), BackColor = VS_INPUT_BG
             };
             inputWrap.Paint += (s, e) =>
                 ControlPaint.DrawBorder(e.Graphics, inputWrap.ClientRectangle,
-                    Color.FromArgb(85,85,85), ButtonBorderStyle.Solid);
+                    Color.FromArgb(85, 85, 85), ButtonBorderStyle.Solid);
 
             commandInput = new TextBox
             {
-                Location = new Point(8,7), Width = 10,
+                Location = new Point(8, 7), Width = 10,
                 BackColor = VS_INPUT_BG, ForeColor = VS_TEXT,
                 BorderStyle = BorderStyle.None,
                 Font = new Font("Cascadia Code", 9f)
@@ -193,7 +196,7 @@ namespace CADCopilot
             sendButton = new Button
             {
                 Tag = "sendBtn", Text = "Send",
-                Location = new Point(10,10), Size = new Size(70,36),
+                Location = new Point(10, 10), Size = new Size(70, 36),
                 BackColor = VS_BLUE, ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold),
@@ -212,8 +215,8 @@ namespace CADCopilot
                 AutoSize      = true,
                 AutoSizeMode  = AutoSizeMode.GrowAndShrink,
                 BackColor     = VS_BG,
-                Location      = new Point(0,0),
-                Padding       = new Padding(6,6,6,6)
+                Location      = new Point(0, 0),
+                Padding       = new Padding(6, 6, 6, 6)
             };
             messagesPanel.Controls.Add(messageFlow);
 
@@ -272,8 +275,8 @@ namespace CADCopilot
             int maxBubW = panelW - 52;
             if (maxBubW < 80) maxBubW = 200;
 
-            var msgFont   = new Font("Segoe UI", 9f);
-            var textSize  = TextRenderer.MeasureText(
+            var msgFont  = new Font("Segoe UI", 9f);
+            var textSize = TextRenderer.MeasureText(
                 text, msgFont, new Size(maxBubW - 20, int.MaxValue),
                 TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
             int bubW = Math.Min(textSize.Width + 22, maxBubW);
@@ -283,12 +286,12 @@ namespace CADCopilot
             var row = new Panel
             {
                 Width = panelW, Height = rowH,
-                BackColor = VS_BG, Margin = new Padding(0,0,0,4)
+                BackColor = VS_BG, Margin = new Padding(0, 0, 0, 4)
             };
 
             Color avBgCopy   = avBg;
             string avTxtCopy = avTxt;
-            var avatar = new Panel { Size = new Size(30,30), BackColor = Color.Transparent };
+            var avatar = new Panel { Size = new Size(30, 30), BackColor = Color.Transparent };
             avatar.Paint += (s, e) =>
             {
                 var g = e.Graphics;
@@ -298,13 +301,13 @@ namespace CADCopilot
                 var f  = new Font("Segoe UI", avTxtCopy.Length > 1 ? 7f : 9f, FontStyle.Bold);
                 var sz = g.MeasureString(avTxtCopy, f);
                 g.DrawString(avTxtCopy, f, Brushes.White,
-                    (29f - sz.Width)/2f, (29f - sz.Height)/2f);
+                    (29f - sz.Width) / 2f, (29f - sz.Height) / 2f);
             };
 
             var msgLbl = new Label
             {
                 Text = text, Font = msgFont, ForeColor = textColor, BackColor = bubbleBg,
-                Size = new Size(bubW, bubH), Padding = new Padding(10,8,10,8), AutoSize = false
+                Size = new Size(bubW, bubH), Padding = new Padding(10, 8, 10, 8), AutoSize = false
             };
             var tsLbl = new Label
             {
@@ -355,13 +358,15 @@ namespace CADCopilot
             });
         }
 
+        // ─────────────────────────────────────────────
+        //  BUTTON HANDLERS
+        // ─────────────────────────────────────────────
         private async void UploadDwg_Click(object sender, EventArgs e)
         {
             try
             {
                 using var dlg = new OpenFileDialog
                 {
-                    // ↓ CHANGED: accepts both DWG and DXF
                     Filter = "CAD Files|*.dwg;*.dxf",
                     Title  = "Select DWG or DXF Base Map"
                 };
@@ -513,6 +518,36 @@ namespace CADCopilot
             }
         }
 
+        private void Reset_Click(object sender, EventArgs e)
+        {
+            // Clear all state
+            currentFileId   = null;
+            currentExcelId  = null;
+            currentOutputId = null;
+
+            // Reset upload buttons
+            uploadDwgButton.Text      = "📁  Upload DWG/DXF";
+            uploadDwgButton.BackColor  = VS_BLUE;
+            uploadDwgButton.Enabled    = true;
+
+            uploadExcelButton.Text      = "📊  Upload Excel";
+            uploadExcelButton.BackColor  = VS_BLUE;
+            uploadExcelButton.Enabled    = true;
+
+            // Reset action buttons
+            autoDrawButton.Text      = "🤖  Auto Draw LPS";
+            autoDrawButton.BackColor  = Color.FromArgb(55, 55, 55);
+            autoDrawButton.ForeColor  = Color.White;
+            autoDrawButton.Enabled    = false;
+
+            downloadButton.Text      = "⬇  Download DXF";
+            downloadButton.BackColor  = Color.FromArgb(55, 55, 55);
+            downloadButton.Enabled    = false;
+
+            SetStatus("", VS_GRAY);
+            AddBubble("system", "Reset! Upload your DWG/DXF and Excel files again.");
+        }
+
         private async void SendButton_Click(object sender, EventArgs e)
         {
             try
@@ -550,6 +585,9 @@ namespace CADCopilot
             }
         }
 
+        // ─────────────────────────────────────────────
+        //  HELPERS
+        // ─────────────────────────────────────────────
         private void CheckReady()
         {
             if (currentFileId != null && currentExcelId != null)
@@ -583,7 +621,7 @@ namespace CADCopilot
                 Text = text, Location = new Point(x, y), Size = new Size(w, h),
                 BackColor = bg, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 8.5f), Cursor = Cursors.Hand,
-                TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8,0,0,0)
+                TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0)
             };
             b.FlatAppearance.BorderSize = 0;
             return b;
