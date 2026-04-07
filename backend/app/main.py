@@ -3,35 +3,19 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 import os
-import uuid
-from app.config import UPLOAD_DIR, API_HOST, API_PORT, API_KEY
+from app.config import UPLOAD_DIR, API_HOST, API_PORT
 from app.core.parser import parse_dwg_file
 from app.core.command_handler import parse_command
 from app.core.geometry import execute_geometry_operation
-from app.utils.helpers import log_info, log_error, generate_file_id
+from app.utils.helpers import log_info, log_error, generate_file_id, find_cad_file
 
-app = FastAPI(
-    title="CAD AI Copilot",
-    description="AI-powered DWG file parser and LPS drawing automation",
-    version="1.0.0"
-)
+app = FastAPI(title="CAD AI Copilot", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
 )
-
-# ========== HELPERS ==========
-def find_cad_file(file_id: str) -> str:
-    """Find uploaded CAD file by ID — checks .dxf first, then .dwg"""
-    for ext in (".dxf", ".dwg"):
-        path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
-        if os.path.exists(path):
-            return path
-    return None
 
 # ========== HEALTH ==========
 @app.get("/health")
@@ -47,14 +31,12 @@ async def upload_dwg(file: UploadFile = File(...)):
         if not (lower.endswith('.dwg') or lower.endswith('.dxf')):
             raise HTTPException(status_code=400, detail="File must be .dwg or .dxf")
 
-        file_id  = generate_file_id()
-        ext      = ".dxf" if lower.endswith('.dxf') else ".dwg"
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        file_id   = generate_file_id()
+        ext       = ".dxf" if lower.endswith('.dxf') else ".dwg"
         file_path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
 
-        contents = await file.read()
         with open(file_path, "wb") as f:
-            f.write(contents)
+            f.write(await file.read())
 
         log_info(f"CAD file uploaded: {file_id}{ext}")
         return {"status": "success", "file_id": file_id, "filename": file.filename}
@@ -74,12 +56,10 @@ async def upload_excel(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
 
         excel_id  = generate_file_id()
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
         file_path = os.path.join(UPLOAD_DIR, f"{excel_id}.xlsx")
 
-        contents = await file.read()
         with open(file_path, "wb") as f:
-            f.write(contents)
+            f.write(await file.read())
 
         log_info(f"Excel uploaded: {excel_id}")
         return {"status": "success", "excel_id": excel_id, "filename": file.filename}
@@ -100,7 +80,6 @@ async def parse_file(file_id: str):
             raise HTTPException(status_code=404, detail="File not found")
 
         result = parse_dwg_file(file_path)
-        log_info(f"File parsed: {file_id}")
         return {"status": "success", "file_id": file_id, "result": result}
 
     except HTTPException:
@@ -125,8 +104,7 @@ async def auto_draw(file_id: str, excel_id: str):
         if not os.path.exists(excel_path):
             raise HTTPException(status_code=404, detail="Excel file not found. Please re-upload.")
 
-        lps_data = parse_excel_file(excel_path)
-
+        lps_data    = parse_excel_file(excel_path)
         output_id   = generate_file_id()
         output_path = os.path.join(UPLOAD_DIR, f"{output_id}_output.dxf")
         draw_lps(cad_path, lps_data, output_path)
@@ -146,25 +124,15 @@ async def auto_draw(file_id: str, excel_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ========== COMMAND (COPILOT CHAT) ==========
+# ========== COMMAND (CHAT) ==========
 @app.post("/command")
 async def execute_command(file_id: str, command_text: str):
     try:
-        parsed = parse_command(command_text, API_KEY)
-        if not parsed:
-            raise HTTPException(status_code=400, detail="Could not understand command")
+        # parse_command(file_id, command) → returns AI JSON with draw instructions
+        result = parse_command(file_id, command_text)
 
-        operation  = parsed.get("operation")
-        parameters = parsed.get("parameters", {})
-        result     = execute_geometry_operation(operation, **parameters)
-
-        log_info(f"Command executed: {operation}")
-        return {
-            "status": "success",
-            "operation": operation,
-            "parameters": parameters,
-            "result": result
-        }
+        log_info(f"Command executed for file: {file_id}")
+        return {"status": "success", "result": result}
 
     except HTTPException:
         raise
@@ -176,13 +144,11 @@ async def execute_command(file_id: str, command_text: str):
 # ========== DOWNLOAD OUTPUT ==========
 @app.get("/download/{output_id}")
 async def download_output(output_id: str):
-    # Check for dxf output first, then dwg
     for ext in ("_output.dxf", "_output.dwg"):
         file_path = os.path.join(UPLOAD_DIR, f"{output_id}{ext}")
         if os.path.exists(file_path):
             fname = "lps_output.dxf" if ext.endswith(".dxf") else "lps_output.dwg"
-            return FileResponse(file_path, filename=fname,
-                                media_type="application/octet-stream")
+            return FileResponse(file_path, filename=fname, media_type="application/octet-stream")
     raise HTTPException(status_code=404, detail="Output file not found")
 
 
