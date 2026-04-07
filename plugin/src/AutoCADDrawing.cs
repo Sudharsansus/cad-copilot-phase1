@@ -1,4 +1,4 @@
-// AutoCADDrawing.cs - Drawing Operations
+// AutoCADDrawing.cs - Drawing Operations + Live Editing
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
@@ -16,157 +16,189 @@ namespace CADCopilot
         public AutoCADDrawing()
         {
             document = Application.DocumentManager.MdiActiveDocument;
-            database = document.Database;
+            database = document?.Database;
         }
 
-        // Draw polygon/boundary
-        public void DrawPolygon(List<(double x, double y)> points, string layerName = "LPS_BOUNDARY")
+        public void OpenFile(string filePath)
         {
             try
             {
-                using var transaction = database.TransactionManager.StartTransaction();
-                CreateLayerIfNotExists(layerName, transaction);
-
-                var polyline = new Polyline();
-                polyline.SetDatabaseDefaults();
-
-                for (int i = 0; i < points.Count; i++)
-                    polyline.AddVertexAt(i, new Point2d(points[i].x, points[i].y), 0, 0, 0);
-
-                polyline.Closed = true;
-                polyline.Layer = layerName;
-
-                AddToModelSpace(polyline, transaction);
-                transaction.Commit();
+                var doc = Application.DocumentManager.Open(filePath, false);
+                document = doc;
+                database = doc.Database;
+                Utilities.LogInfo($"Opened in AutoCAD: {filePath}");
             }
-            catch (Exception e) { Utilities.LogError("DrawPolygon failed", e); }
+            catch (Exception e) { Utilities.LogError("OpenFile failed", e); }
         }
 
-        // Draw line
-        public void DrawLine(double x1, double y1, double x2, double y2, string layerName = "LPS_CORRIDOR")
+        private void RefreshDocument()
         {
-            try
-            {
-                using var transaction = database.TransactionManager.StartTransaction();
-                CreateLayerIfNotExists(layerName, transaction);
-
-                var line = new Line(new Point3d(x1, y1, 0), new Point3d(x2, y2, 0));
-                line.Layer = layerName;
-
-                AddToModelSpace(line, transaction);
-                transaction.Commit();
-            }
-            catch (Exception e) { Utilities.LogError("DrawLine failed", e); }
+            var active = Application.DocumentManager.MdiActiveDocument;
+            if (active != null) { document = active; database = active.Database; }
         }
 
-        // Draw text label
-        public void DrawText(string text, double x, double y, double height = 2.5, string layerName = "LPS_TEXT")
-        {
-            try
-            {
-                using var transaction = database.TransactionManager.StartTransaction();
-                CreateLayerIfNotExists(layerName, transaction);
-
-                var dbText = new DBText();
-                dbText.SetDatabaseDefaults();
-                dbText.Position = new Point3d(x, y, 0);
-                dbText.TextString = text;
-                dbText.Height = height;
-                dbText.Layer = layerName;
-
-                AddToModelSpace(dbText, transaction);
-                transaction.Commit();
-            }
-            catch (Exception e) { Utilities.LogError("DrawText failed", e); }
-        }
-
-        // Draw circle (tower marker)
-        public void DrawCircle(double x, double y, double radius, string layerName = "LPS_TOWER")
-        {
-            try
-            {
-                using var transaction = database.TransactionManager.StartTransaction();
-                CreateLayerIfNotExists(layerName, transaction);
-
-                var circle = new Circle(new Point3d(x, y, 0), Vector3d.ZAxis, radius);
-                circle.Layer = layerName;
-
-                AddToModelSpace(circle, transaction);
-                transaction.Commit();
-            }
-            catch (Exception e) { Utilities.LogError("DrawCircle failed", e); }
-        }
-
-        // Draw from API JSON response
         public void DrawFromApiResponse(string jsonResponse)
         {
             try
             {
-                var doc = JObject.Parse(jsonResponse);
-                var result = doc["result"] as JObject;
-                if (result == null) return;
+                RefreshDocument();
+                if (database == null) return;
 
-                string type = (string)result["type"] ?? "";
+                var root = JObject.Parse(jsonResponse);
+                JToken drawToken = (root["result"] as JObject)?["draw"] ?? root["draw"];
+                if (drawToken == null || drawToken.Type != JTokenType.Array) return;
 
-                if (type == "polygon" && result["points"] != null)
+                foreach (var item in (JArray)drawToken)
                 {
-                    var points = new List<(double x, double y)>();
-                    foreach (var pt in (JArray)result["points"])
-                        points.Add(((double)pt[0], (double)pt[1]));
-                    DrawPolygon(points);
+                    string type  = ((string)item["type"] ?? "").ToLower();
+                    string layer = (string)item["layer"] ?? "LPS_BOUNDARY";
+
+                    switch (type)
+                    {
+                        case "line":
+                            DrawLine((double)item["x1"], (double)item["y1"],
+                                     (double)item["x2"], (double)item["y2"], layer);
+                            break;
+                        case "polyline":
+                        case "polygon":
+                            var pts = new List<(double, double)>();
+                            foreach (var pt in (JArray)item["points"])
+                                pts.Add(((double)pt[0], (double)pt[1]));
+                            DrawPolygon(pts, layer);
+                            break;
+                        case "circle":
+                            DrawCircle((double)item["x"], (double)item["y"],
+                                       (double)(item["radius"] ?? 5.0), layer);
+                            break;
+                        case "text":
+                            DrawText((string)item["text"] ?? "",
+                                     (double)item["x"], (double)item["y"],
+                                     (double)(item["height"] ?? 2.5), layer);
+                            break;
+                        case "rectangle":
+                            double rx = (double)item["x"], ry = (double)item["y"];
+                            double rw = (double)item["width"], rh = (double)item["height"];
+                            DrawPolygon(new List<(double, double)>
+                            {
+                                (rx, ry), (rx+rw, ry), (rx+rw, ry+rh), (rx, ry+rh)
+                            }, layer);
+                            break;
+                    }
                 }
-                else if (type == "dimension" && result["point1"] != null)
-                {
-                    var p1 = (JArray)result["point1"];
-                    var p2 = (JArray)result["point2"];
-                    DrawLine((double)p1[0], (double)p1[1], (double)p2[0], (double)p2[1]);
-                }
+                ZoomExtents();
             }
             catch (Exception e) { Utilities.LogError("DrawFromApiResponse failed", e); }
         }
 
-        // Clear all entities on a layer
+        public void ZoomExtents()
+        {
+            try { document?.SendStringToExecute("ZOOM\nE\n", true, false, false); }
+            catch { }
+        }
+
+        public void DrawPolygon(List<(double x, double y)> points, string layerName = "LPS_BOUNDARY")
+        {
+            try
+            {
+                RefreshDocument();
+                using var t = database.TransactionManager.StartTransaction();
+                CreateLayerIfNotExists(layerName, t);
+                var poly = new Polyline();
+                poly.SetDatabaseDefaults();
+                for (int i = 0; i < points.Count; i++)
+                    poly.AddVertexAt(i, new Point2d(points[i].x, points[i].y), 0, 0, 0);
+                poly.Closed = true;
+                poly.Layer  = layerName;
+                AddToModelSpace(poly, t);
+                t.Commit();
+            }
+            catch (Exception e) { Utilities.LogError("DrawPolygon failed", e); }
+        }
+
+        public void DrawLine(double x1, double y1, double x2, double y2, string layerName = "LPS_CORRIDOR")
+        {
+            try
+            {
+                RefreshDocument();
+                using var t = database.TransactionManager.StartTransaction();
+                CreateLayerIfNotExists(layerName, t);
+                var line = new Line(new Point3d(x1, y1, 0), new Point3d(x2, y2, 0)) { Layer = layerName };
+                AddToModelSpace(line, t);
+                t.Commit();
+            }
+            catch (Exception e) { Utilities.LogError("DrawLine failed", e); }
+        }
+
+        public void DrawText(string text, double x, double y, double height = 2.5, string layerName = "LPS_TEXT")
+        {
+            try
+            {
+                RefreshDocument();
+                using var t = database.TransactionManager.StartTransaction();
+                CreateLayerIfNotExists(layerName, t);
+                var dbText = new DBText();
+                dbText.SetDatabaseDefaults();
+                dbText.Position   = new Point3d(x, y, 0);
+                dbText.TextString = text;
+                dbText.Height     = height;
+                dbText.Layer      = layerName;
+                AddToModelSpace(dbText, t);
+                t.Commit();
+            }
+            catch (Exception e) { Utilities.LogError("DrawText failed", e); }
+        }
+
+        public void DrawCircle(double x, double y, double radius, string layerName = "LPS_TOWER")
+        {
+            try
+            {
+                RefreshDocument();
+                using var t = database.TransactionManager.StartTransaction();
+                CreateLayerIfNotExists(layerName, t);
+                var circle = new Circle(new Point3d(x, y, 0), Vector3d.ZAxis, radius) { Layer = layerName };
+                AddToModelSpace(circle, t);
+                t.Commit();
+            }
+            catch (Exception e) { Utilities.LogError("DrawCircle failed", e); }
+        }
+
         public void ClearLayer(string layerName)
         {
             try
             {
-                using var transaction = database.TransactionManager.StartTransaction();
-                var blockTable = (BlockTable)transaction.GetObject(database.BlockTableId, OpenMode.ForRead);
-                var modelSpace = (BlockTableRecord)transaction.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-
-                foreach (ObjectId id in modelSpace)
+                RefreshDocument();
+                using var t = database.TransactionManager.StartTransaction();
+                var bt = (BlockTable)t.GetObject(database.BlockTableId, OpenMode.ForRead);
+                var ms = (BlockTableRecord)t.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                foreach (ObjectId id in ms)
                 {
-                    var entity = (Entity)transaction.GetObject(id, OpenMode.ForRead);
-                    if (entity.Layer == layerName)
-                    {
-                        entity.UpgradeOpen();
-                        entity.Erase();
-                    }
+                    var entity = (Entity)t.GetObject(id, OpenMode.ForRead);
+                    if (entity.Layer == layerName) { entity.UpgradeOpen(); entity.Erase(); }
                 }
-                transaction.Commit();
+                t.Commit();
             }
             catch (Exception e) { Utilities.LogError("ClearLayer failed", e); }
         }
 
-        private void AddToModelSpace(Entity entity, Transaction transaction)
+        private void AddToModelSpace(Entity entity, Transaction t)
         {
-            var blockTable = (BlockTable)transaction.GetObject(database.BlockTableId, OpenMode.ForRead);
-            var modelSpace = (BlockTableRecord)transaction.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-            modelSpace.AppendEntity(entity);
-            transaction.AddNewlyCreatedDBObject(entity, true);
+            var bt = (BlockTable)t.GetObject(database.BlockTableId, OpenMode.ForRead);
+            var ms = (BlockTableRecord)t.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+            ms.AppendEntity(entity);
+            t.AddNewlyCreatedDBObject(entity, true);
         }
 
-        private void CreateLayerIfNotExists(string layerName, Transaction transaction)
+        private void CreateLayerIfNotExists(string layerName, Transaction t)
         {
             try
             {
-                var layerTable = (LayerTable)transaction.GetObject(database.LayerTableId, OpenMode.ForRead);
-                if (!layerTable.Has(layerName))
+                var lt = (LayerTable)t.GetObject(database.LayerTableId, OpenMode.ForRead);
+                if (!lt.Has(layerName))
                 {
-                    layerTable.UpgradeOpen();
+                    lt.UpgradeOpen();
                     var newLayer = new LayerTableRecord { Name = layerName };
-                    layerTable.Add(newLayer);
-                    transaction.AddNewlyCreatedDBObject(newLayer, true);
+                    lt.Add(newLayer);
+                    t.AddNewlyCreatedDBObject(newLayer, true);
                 }
             }
             catch (Exception e) { Utilities.LogError("CreateLayer failed", e); }
