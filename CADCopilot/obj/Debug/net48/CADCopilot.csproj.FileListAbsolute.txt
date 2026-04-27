@@ -1,0 +1,10 @@
+C:\cad-copilot-phase1\CADCopilot\bin\Debug\net48\CADCopilot.dll
+C:\cad-copilot-phase1\CADCopilot\bin\Debug\net48\CADCopilot.pdb
+C:\cad-copilot-phase1\CADCopilot\bin\Debug\net48\Newtonsoft.Json.dll
+C:\cad-copilot-phase1\CADCopilot\obj\Debug\net48\CADCopilot.csproj.AssemblyReference.cache
+C:\cad-copilot-phase1\CADCopilot\obj\Debug\net48\CADCopilot.GeneratedMSBuildEditorConfig.editorconfig
+C:\cad-copilot-phase1\CADCopilot\obj\Debug\net48\CADCopilot.csproj.CoreCompileInputs.cache
+C:\cad-copilot-phase1\CADCopilot\obj\Debug\net48\CADCopilot.sourcelink.json
+C:\cad-copilot-phase1\CADCopilot\obj\Debug\net48\CADCopilot.csproj.Up2Date
+C:\cad-copilot-phase1\CADCopilot\obj\Debug\net48\CADCopilot.dll
+C:\cad-copilot-phase1\CADCopilot\obj\Debug\net48\CADCopilot.pdb
